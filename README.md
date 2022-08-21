@@ -123,39 +123,4 @@ Lambda 架构的优点：既支持批量离线数据的处理、又支持实时�
 ```
 Lambda 架构的缺点：同1套数据的处理，要编写两套打码。1套离线1套实时，增加了维护成本。
 ```
-题目三：简答题（三选一）   
-A：简述 HDFS 的读写流程，要求不少于 300 字  
-```
-本答案参考《大数据技术原理与应用（第2版）3.6 HDFS的数据读写过程》
-读：
-1、通过FileSystem.open()方法打开文件，内部通过ClientProtocal.getBlockLocations()远程调用namenode，得到文件开始部分数据块的保存位置，并根据block和客户端的远近排序
-2、调用FileSystem.read()读取文件，选择距离最近的block开始读，读取完毕后，关闭和该datanode的连接。
-3、调用内部通过ClientProtocal.getBlockLocations()继续获取后续block的位置信息，继续读取
-4、全部读取完毕后，掉用FileSystem.close关闭输入流结束读取
-5、如果读取异常，则会尝试更换当前block的其他datanode来读取当前block。
    
-写：
-1、FileSystem.create()方法创建文件，内部通过DistributedFileSystem以rpc的方式调用namenode,新建1个文件。namenode会进行一些存在性、权限等检查，通过后创建1个输出流返回；
-2、FileSystem.write()方法开始写文件。文件会被分为1个1个的小包存入1个内部队列。同时输出流会向namenode申请保存文件和副本block的datanode，并将这些datanode形成1个datanode管道；
-3、1个个的小包会按顺序写入datanode管道，管道里的各个datanode收到数据包后，先写入自己的磁盘，然后把这个小包发给下游的datanode，下游datanode执行保存后再发给下游；
-4、最后1个datanode写入成功后，会向它的前1个datanode反馈1个确认包，各个datanode按反的顺序往前面的datanode持续反馈确认包，直到回到第1个datanode，最后再回到输出流(客户端)；
-5、所有文件包都写成功后，调用FileSystem.close()方法关闭输出流，结束文件的写出。
-6、一般来说，1个block的多个副本的存放规则是：离客户端最近的节点存1份A，A不同机架的节点存1份B，A同1个机架的其他节点存1份C，如果有更多副本，就随机存储到更多节点上。
-
-```
-B：简述 Spark Shuffle 的工作原理，要求不少于 300 字
-```
-不同于mapreduce，每个环节都进行文件的落盘，导致shuffle的产生，spark创造了有向无环图的思路来优化数据处理流程。通过对处理过程进行分析，确定了宽依赖、窄依赖两种不同的数据转换形态。
-窄依赖的两个转换之间，属于同1个jvm，因此其shuffle过程直接是内存处理，不存在文件写和读，因此效率大大的超过mapreduce。
-宽依赖由于存在分布式跨节点数据交互，因此必然存在shuffle过程。又细分为shuffle write和shuffle read两个环节，分别进行文件的输出和文件的读取。
-shuffle write时，会先将数据存在内存中，达到一定的阈值后再写到hdfs。实际会根据下游stage的情况确定文件数量，并对文件根据hash或排序规则进行分组，写到不同的文件中。
-shuffle read时，会根据上游stage的情况，读取当前task需要的文件，一边读一边进行聚合处理。
-```
-C：简述 Flink SQL 的工作原理，要求不少于 300 字  
-```
-1、flink sql 同spark sql一样，在sql提交后，都会执行sql分析和优化过程，生成逻辑计划和物理计划，并最终通过codegen生成执行代码；
-2、执行代码进一步编译，变成JobGraph提交运行,jobGraph中将窄依赖的task合并为1个stage，将宽依赖的task转换为独立的stage；
-3、flink继续优化，根据数据流(文件)的分区（文件数）情况，生成对应的并行度，同1个task的多个并行度对应多个分区概念，不同stage之间的多个分区数据会存在shuffle的过程；
-4、如果是批量数据sql处理，则类似于spark执行，最终计算完毕后数据进行输出或者写到输出表(sink)中；
-5、如果是流式数据sql处理，则必须有窗口机制，将每个窗口内的数据进行聚合计算，然后输出到表(sink)中；
-```
